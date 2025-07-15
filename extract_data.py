@@ -1,13 +1,29 @@
+import argparse
 import requests
 import csv
 import time
 from datetime import datetime
 from dateutil.parser import isoparse
 
+# ------------------- CLI ARGUMENT PARSING -------------------
+parser = argparse.ArgumentParser(description='Fetch WATI conversations.')
+parser.add_argument('--date', required=True, help='Target date in DD-MM-YYYY format')
+parser.add_argument('--token', required=True, help='Bearer token for API authorization')
+
+args = parser.parse_args()
+
+# Parse date
+try:
+    TARGET_DATE = datetime.strptime(args.date, "%d-%m-%Y")
+except ValueError:
+    print("❌ Invalid date format. Please use DD-MM-YYYY.")
+    exit(1)
+
+TOKEN = args.token
+
 # ------------------- CONFIG -------------------
-TARGET_DATE = datetime.strptime("30-04-2025", "%d-%m-%Y")
 API_URL = 'https://live-mt-server.wati.io/444/api/v1/conversations/filter'
-TOKEN = ''  # <- REPLACE THIS
+
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0',
     'Accept': '*/*',
@@ -66,6 +82,7 @@ def parse_notes(notes_list):
 all_rows = []
 stop = False
 last_id = None
+target_date_hits = 0
 
 while not stop:
     payload = BASE_PAYLOAD.copy()
@@ -73,11 +90,11 @@ while not stop:
 
     response = requests.post(API_URL, headers=HEADERS, json=payload)
     if response.status_code != 200:
-        print(f"Request failed with status code {response.status_code}")
+        print(f"❌ Request failed with status code {response.status_code}")
         break
 
     items = response.json().get('result', {}).get('items', [])
-    print(f"Retrieved {len(items)} items")
+    print(f"📥 Retrieved {len(items)} items")
 
     if not items:
         break
@@ -85,12 +102,14 @@ while not stop:
     for item in items:
         assigned_at_raw = item.get("ticket", {}).get("assignedAt", "")
         last_updated_raw = item.get("ticket", {}).get("lastUpdated", "")
-
         assigned_date = isoparse(assigned_at_raw) if assigned_at_raw else None
+
         if assigned_date and assigned_date.date() <= TARGET_DATE.date():
-            stop = True
-            print(f"Stopping at item with assignedAt: {assigned_date.date()}")
-            break
+            target_date_hits += 1
+            print(f"✅ Target date hit {target_date_hits} time(s) at: {assigned_date.date()}")
+            if target_date_hits >= 2:
+                stop = True
+                break
 
         all_rows.append({
             'Name': item.get('name', ''),
@@ -104,7 +123,7 @@ while not stop:
     if not last_id or stop:
         break
 
-    print("Waiting 5 seconds before next request...")
+    print("⏳ Waiting 5 seconds before next request...")
     time.sleep(5)
 
 # ------------------- WRITE TO CSV -------------------
@@ -115,3 +134,4 @@ with open('wati_conversations.csv', 'w', newline='', encoding='utf-8') as csvfil
     writer.writerows(all_rows)
 
 print("✅ Data saved to wati_conversations.csv")
+
